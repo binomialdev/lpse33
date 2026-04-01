@@ -4,36 +4,16 @@
 <meta charset="UTF-8">
 <title>Monitoring Proyek</title>
 
+<!-- PapaParse (biar CSV aman) -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
 <style>
-body {
-    font-family: Arial;
-    padding: 20px;
-}
-
-select, button {
-    padding: 6px 10px;
-    margin: 5px;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
-}
-
-th, td {
-    border: 1px solid #ddd;
-    padding: 8px;
-}
-
-th {
-    background: #f4f4f4;
-}
-
-.pagination button {
-    margin: 3px;
-}
-
+body { font-family: Arial; padding: 20px; }
+select, button { padding: 6px 10px; margin: 5px; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+th, td { border: 1px solid #ddd; padding: 8px; }
+th { background: #f4f4f4; }
+.pagination button { margin: 3px; }
 .badge {
     background: #007bff;
     color: white;
@@ -77,46 +57,40 @@ const SHEET_ID = "1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg";
 let perusahaanData = [];
 let proyekData = [];
 
+let filteredData = [];
 let currentPage = 1;
 let perPage = 10;
-let filteredData = [];
 
 
-// ================= FETCH API SUPER CEPAT =================
-async function fetchSheet(sheetName){
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
-    
+// ================= FETCH CSV (STABIL) =================
+async function fetchCSV(sheet){
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&sheet=${sheet}`;
+
     const res = await fetch(url);
-    let text = await res.text();
+    const text = await res.text();
 
-    const json = JSON.parse(text.substring(47).slice(0, -2));
-
-    const rows = json.table.rows;
-    const cols = json.table.cols.map(c => c.label);
-
-    return rows.map(r => {
-        let obj = {};
-        r.c.forEach((cell, i) => {
-            obj[cols[i]] = cell ? cell.v : '';
-        });
-        return obj;
+    const parsed = Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true
     });
+
+    return parsed.data;
 }
 
 
 // ================= LOAD DATA =================
 async function loadData(){
-    let cache = localStorage.getItem('db_cache_v3');
+    let cache = localStorage.getItem('db_cache_csv');
 
     if(cache){
         let parsed = JSON.parse(cache);
         perusahaanData = parsed.perusahaan;
         proyekData = parsed.proyek;
     } else {
-        perusahaanData = await fetchSheet('PERUSAHAAN');
-        proyekData = await fetchSheet('PROYEK');
+        perusahaanData = await fetchCSV('PERUSAHAAN');
+        proyekData = await fetchCSV('PROYEK');
 
-        localStorage.setItem('db_cache_v3', JSON.stringify({
+        localStorage.setItem('db_cache_csv', JSON.stringify({
             perusahaan: perusahaanData,
             proyek: proyekData
         }));
@@ -132,11 +106,13 @@ function initFilter(){
     let setKab = new Set();
 
     perusahaanData.forEach(d => {
-        let values = Object.values(d);
-        let kab = values[2] || '';
+        let vals = Object.values(d);
 
-        if(kab && kab.toString().trim() !== ''){
-            setKab.add(kab.toString().trim());
+        // kolom C = index 2
+        let kab = vals[2] ? vals[2].toString().trim() : '';
+
+        if(kab !== ''){
+            setKab.add(kab);
         }
     });
 
@@ -161,8 +137,8 @@ function applyFilter(){
     let selected = document.getElementById("filterKab").value;
 
     filteredData = perusahaanData.filter(d => {
-        let values = Object.values(d);
-        let kab = values[2] || '';
+        let vals = Object.values(d);
+        let kab = vals[2] ? vals[2].toString().trim() : '';
         return selected === "" || kab === selected;
     });
 
@@ -171,20 +147,20 @@ function applyFilter(){
 }
 
 
-// ================= RENDER TABLE =================
+// ================= RENDER =================
 function renderTable(){
     let start = (currentPage - 1) * perPage;
     let end = start + perPage;
 
-    let data = filteredData.slice(start, end);
+    let pageData = filteredData.slice(start, end);
 
     let html = '';
 
-    data.forEach(d => {
-        let values = Object.values(d);
+    pageData.forEach(d => {
+        let vals = Object.values(d);
 
-        let nama = values[1] || '-';
-        let kab = values[2] || '-';
+        let nama = vals[1] || '-';
+        let kab = vals[2] || '-';
 
         html += `
         <tr>
@@ -197,15 +173,15 @@ function renderTable(){
 
     document.getElementById("tableBody").innerHTML = html;
 
-    let totalPage = Math.ceil(filteredData.length / perPage);
+    let totalPage = Math.ceil(filteredData.length / perPage) || 1;
     document.getElementById("pageInfo").innerText = `Page ${currentPage} / ${totalPage}`;
 }
 
 
 // ================= PAGINATION =================
 function nextPage(){
-    let totalPage = Math.ceil(filteredData.length / perPage);
-    if(currentPage < totalPage){
+    let total = Math.ceil(filteredData.length / perPage);
+    if(currentPage < total){
         currentPage++;
         renderTable();
     }
@@ -231,11 +207,8 @@ function lastPage(){
 
 // ================= DETAIL =================
 function showDetail(nama){
-    let proyek = proyekData.filter(p => {
-        return JSON.stringify(p).includes(nama);
-    });
-
-    alert("Jumlah proyek: " + proyek.length);
+    let list = proyekData.filter(p => JSON.stringify(p).includes(nama));
+    alert("Jumlah proyek: " + list.length);
 }
 
 
