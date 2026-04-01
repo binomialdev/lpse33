@@ -4,11 +4,10 @@
 <meta charset="UTF-8">
 <title>Dashboard Konstruksi PRO</title>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
-body { font-family: 'Segoe UI'; margin:0; background:#f1f5f9 }
+body { font-family:'Segoe UI'; margin:0; background:#f1f5f9 }
 .container { padding:20px }
 
 .card {
@@ -19,8 +18,6 @@ body { font-family: 'Segoe UI'; margin:0; background:#f1f5f9 }
     box-shadow:0 4px 10px rgba(0,0,0,0.05)
 }
 
-h2 { margin-bottom:10px }
-
 input, select {
     padding:8px;
     border-radius:8px;
@@ -28,7 +25,7 @@ input, select {
 }
 
 button {
-    padding:8px 12px;
+    padding:6px 10px;
     border:none;
     border-radius:8px;
     background:#2563eb;
@@ -38,22 +35,16 @@ button {
 
 button:hover { background:#1d4ed8 }
 
-table {
-    width:100%;
-    border-collapse: collapse;
-}
-
-th, td {
-    padding:10px;
-    border-bottom:1px solid #eee;
-}
+table { width:100%; border-collapse: collapse }
+th, td { padding:10px; border-bottom:1px solid #eee }
 
 .pagination button {
-    margin:3px;
+    margin:2px;
     background:#e2e8f0;
     color:black;
 }
 
+/* MODAL */
 #modal {
     position:fixed;
     top:0; left:0;
@@ -64,12 +55,20 @@ th, td {
 
 #modal-content {
     background:white;
-    margin:50px auto;
+    margin:40px auto;
     padding:20px;
     width:70%;
     border-radius:12px;
     max-height:80vh;
     overflow:auto;
+    position:relative;
+}
+
+.close-btn {
+    position:absolute;
+    top:10px;
+    left:10px;
+    background:red;
 }
 </style>
 </head>
@@ -78,14 +77,10 @@ th, td {
 
 <div class="container">
 
-<h2>📊 Dashboard Konstruksi (PRO)</h2>
+<h2>📊 Dashboard Perusahaan Konstruksi</h2>
 
 <div class="card">
 <select id="filter"></select>
-</div>
-
-<div class="card">
-<canvas id="chart"></canvas>
 </div>
 
 <div class="card">
@@ -117,7 +112,7 @@ th, td {
 <script>
 
 let perusahaan=[], proyek=[];
-let page=1, size=10, chart;
+let page=1, size=10;
 
 // INIT
 window.onload = async ()=>{
@@ -126,34 +121,29 @@ window.onload = async ()=>{
     render();
 };
 
-// LOAD + CACHE
+// LOAD DATA
 async function loadData(){
-    if(localStorage.getItem('perusahaan')){
-        perusahaan = JSON.parse(localStorage.getItem('perusahaan'));
-        proyek = JSON.parse(localStorage.getItem('proyek'));
-        return;
-    }
-
     perusahaan = await fetchSheet('PERUSAHAAN');
     proyek = await fetchSheet('PROYEK');
 
-    localStorage.setItem('perusahaan', JSON.stringify(perusahaan));
-    localStorage.setItem('proyek', JSON.stringify(proyek));
+    console.log("PERUSAHAAN:", perusahaan);
+    console.log("PROYEK:", proyek);
 }
 
-// FETCH
+// FETCH (lebih fleksibel)
 async function fetchSheet(sheet){
-    const url = `https://docs.google.com/spreadsheets/d/1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg/gviz/tq?tqx=out:json&sheet=${sheet}`;
+    const url = `https://docs.google.com/spreadsheets/d/1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg/export?format=csv&sheet=${sheet}`;
+    
     const res = await fetch(url);
-    const txt = await res.text();
-    const json = JSON.parse(txt.substring(47).slice(0,-2));
+    const text = await res.text();
 
-    const cols = json.table.cols.map(c=>c.label);
+    const rows = text.split('\n').map(r=>r.split(','));
+    const headers = rows[0].map(h=>h.trim());
 
-    return json.table.rows.map(r=>{
-        let o={};
-        r.c.forEach((c,i)=>o[cols[i]]=c?c.v:'');
-        return o;
+    return rows.slice(1).map(r=>{
+        let obj={};
+        headers.forEach((h,i)=>obj[h]=r[i]||'');
+        return obj;
     });
 }
 
@@ -172,7 +162,6 @@ function initFilter(){
 // RENDER
 function render(){
     renderTable();
-    renderChart();
 }
 
 // TABLE
@@ -205,42 +194,67 @@ function renderTable(){
 
     document.getElementById('tbody').innerHTML=html;
 
-    renderPage(data.length);
+    renderPagination(data.length);
 }
 
-// PAGINATION
-function renderPage(total){
-    let pages=Math.ceil(total/size);
-    let html='';
+// PAGINATION (ADVANCED)
+function renderPagination(total){
+    let totalPages = Math.ceil(total/size);
+    let html = '';
 
-    for(let i=1;i<=pages;i++){
-        html+=`<button onclick="go(${i})">${i}</button>`;
+    let start = Math.max(1, page-2);
+    let end = Math.min(totalPages, page+2);
+
+    html += `<button onclick="go(1)">First</button>`;
+    html += `<button onclick="go(${page-1})">Prev</button>`;
+
+    for(let i=start;i<=end;i++){
+        html += `<button onclick="go(${i})">${i}</button>`;
     }
+
+    html += `<button onclick="go(${page+1})">Next</button>`;
+    html += `<button onclick="go(${totalPages})">Last</button>`;
 
     document.getElementById('pagination').innerHTML=html;
 }
 
-function go(p){ page=p; renderTable(); }
+function go(p){
+    if(p<1) return;
+    page = p;
+    renderTable();
+}
 
 // DETAIL
 function detail(k){
-    let d=perusahaan.find(x=>x['Kode Penyedia']==k);
-    let html='<h3>Detail</h3>';
+    let d = perusahaan.find(x=>x['Kode Penyedia']==k);
+    let html = `<button class="close-btn" onclick="closeM()">X</button>`;
+    html += `<h3>Detail Penyedia</h3>`;
 
-    Object.keys(d).forEach(k=>{
-        html+=`<p><b>${k}</b>: ${d[k]}</p>`;
+    Object.keys(d).forEach(key=>{
+        html += `<p><b>${key}</b>: ${d[key]}</p>`;
     });
 
     show(html);
 }
 
-// PROYEK
+// PROYEK (FIX FLEXIBLE KOLOM)
 function proj(k){
-    let data=proyek.filter(p=>p['Kode Penyedia']==k);
+    let data = proyek.filter(p=>{
+        return (p['Kode Penyedia']||p['kode_penyedia']) == k;
+    });
 
-    let html='<h3>Proyek</h3>';
+    let html = `<button class="close-btn" onclick="closeM()">X</button>`;
+    html += `<h3>Daftar Proyek</h3>`;
+
+    if(data.length==0){
+        html += `<p>Tidak ada proyek</p>`;
+    }
+
     data.forEach(p=>{
-        html+=`<p>${p['Nama Paket']} | Rp ${p['nilai_kontrak']}</p>`;
+        html += `<p>
+        ${p['Nama Paket'] || p['nama_paket'] || '-'} 
+        | Rp ${p['nilai_kontrak'] || p['Nilai Kontrak'] || 0}
+        </p>`;
     });
 
     show(html);
@@ -248,8 +262,7 @@ function proj(k){
 
 // MODAL
 function show(html){
-    document.getElementById('modal-content').innerHTML =
-        html + '<br><button onclick="closeM()">Close</button>';
+    document.getElementById('modal-content').innerHTML = html;
     document.getElementById('modal').style.display='block';
 }
 
@@ -257,34 +270,12 @@ function closeM(){
     document.getElementById('modal').style.display='none';
 }
 
-// CHART
-function renderChart(){
-    const f=document.getElementById('filter').value;
-    let data=perusahaan.filter(d=>!f||d['Kabupaten/Kota']==f);
-
-    let count={};
-    data.forEach(d=>{
-        let k=d['Kabupaten/Kota'];
-        count[k]=(count[k]||0)+1;
-    });
-
-    if(chart) chart.destroy();
-
-    chart=new Chart(document.getElementById('chart'),{
-        type:'bar',
-        data:{
-            labels:Object.keys(count),
-            datasets:[{data:Object.values(count)}]
-        }
-    });
-}
-
 // EXPORT
 function exportExcel(){
-    const ws=XLSX.utils.json_to_sheet(perusahaan);
-    const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,"Data");
-    XLSX.writeFile(wb,"data.xlsx");
+    const ws = XLSX.utils.json_to_sheet(perusahaan);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
+    XLSX.writeFile(wb, "data.xlsx");
 }
 
 </script>
