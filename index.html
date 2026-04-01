@@ -4,8 +4,15 @@
 <meta charset="UTF-8">
 <title>Dashboard Konstruksi</title>
 
-<!-- jQuery -->
+<!-- jQuery CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+<!-- Fallback jQuery -->
+<script>
+if (typeof jQuery === "undefined") {
+    document.write('<script src="https://code.jquery.com/jquery-3.6.0.min.js"><\/script>');
+}
+</script>
 
 <!-- Chart -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -18,9 +25,9 @@ body { font-family: Arial; margin:20px; background:#f5f6fa }
 .card { background:white; padding:15px; border-radius:10px; margin-bottom:15px }
 table { width:100%; border-collapse: collapse }
 th, td { padding:8px; border-bottom:1px solid #ddd }
-button { padding:5px 10px; margin:2px }
+button { padding:5px 10px; margin:2px; cursor:pointer }
 .search-box { margin-bottom:10px }
-.pagination button { margin-right:5px }
+#pagination button { margin-right:5px }
 #popup { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:none }
 #popup-content { background:white; padding:20px; margin:50px auto; width:70%; border-radius:10px }
 </style>
@@ -71,20 +78,30 @@ let perusahaan = [];
 let proyek = [];
 let currentPage = 1;
 let pageSize = 10;
-let chart;
+let chart = null;
 
-// INIT
-jQuery(document).ready(async function(){
-    await loadData();
-    renderFilter();
-    renderTable();
-    renderChart();
-
-    jQuery('#search').on('input', ()=>{
-        currentPage = 1;
-        renderTable();
-    });
+// READY (AMAN)
+jQuery(document).ready(function(){
+    init();
 });
+
+async function init(){
+    try{
+        await loadData();
+        renderFilter();
+        renderTable();
+        renderChart();
+
+        jQuery('#search').on('input', function(){
+            currentPage = 1;
+            renderTable();
+        });
+
+    } catch(err){
+        alert("ERROR LOAD DATA: " + err.message);
+        console.error(err);
+    }
+}
 
 // LOAD DATA
 async function loadData(){
@@ -95,9 +112,11 @@ async function loadData(){
 // FETCH GOOGLE SHEET
 async function fetchSheet(sheet){
     const url = `https://docs.google.com/spreadsheets/d/1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg/gviz/tq?tqx=out:json&sheet=${sheet}`;
+    
     const res = await fetch(url);
-    const text = await res.text();
+    if(!res.ok) throw new Error("Gagal fetch sheet " + sheet);
 
+    const text = await res.text();
     const json = JSON.parse(text.substring(47).slice(0,-2));
 
     const cols = json.table.cols.map(c=>c.label);
@@ -115,12 +134,13 @@ async function fetchSheet(sheet){
 function renderFilter(){
     const kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
 
-    jQuery('#filter').append(`<option value="">ALL</option>`);
+    jQuery('#filter').html(`<option value="">ALL</option>`);
+
     kab.forEach(k=>{
         jQuery('#filter').append(`<option>${k}</option>`);
     });
 
-    jQuery('#filter').on('change', ()=>{
+    jQuery('#filter').on('change', function(){
         currentPage = 1;
         renderTable();
         renderChart();
@@ -180,7 +200,6 @@ function goPage(p){
 // DETAIL
 function detail(kode){
     let d = perusahaan.find(x=>x['Kode Penyedia']==kode);
-
     let html = `<h3>Detail Perusahaan</h3>`;
 
     Object.keys(d).forEach(k=>{
