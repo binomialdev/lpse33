@@ -1,0 +1,172 @@
+<script>
+
+const sheetID = "1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg";
+
+const API_PERUSAHAAN = `https://docs.google.com/spreadsheets/d/${sheetID}/gviz/tq?tqx=out:json&sheet=PERUSAHAAN`;
+const API_PROYEK = `https://docs.google.com/spreadsheets/d/${sheetID}/gviz/tq?tqx=out:json&sheet=PROYEK`;
+
+let perusahaan=[], proyek=[];
+let currentPage=1, rows=10;
+
+async function init(){
+  try {
+    await loadData();
+    console.log("DATA PERUSAHAAN:", perusahaan);
+    console.log("DATA PROYEK:", proyek);
+
+    initFilter();
+    renderAll();
+  } catch(err){
+    alert("ERROR LOAD DATA: " + err.message);
+    console.error(err);
+  } finally {
+    $("#loader").hide();
+  }
+}
+
+async function loadData(){
+
+  async function fetchSheet(url){
+    let res = await fetch(url);
+    let text = await res.text();
+
+    // 🔥 FIX parsing aman
+    let jsonText = text.match(/google\.visualization\.Query\.setResponse\((.*)\);/);
+    if(!jsonText) throw new Error("Format data tidak valid");
+
+    let json = JSON.parse(jsonText[1]);
+
+    let cols = json.table.cols.map(c => c.label);
+    let rows = json.table.rows.map(r => {
+      let obj = {};
+      r.c.forEach((c,i)=>{
+        obj[cols[i]] = c ? c.v : "";
+      });
+      return obj;
+    });
+
+    return rows;
+  }
+
+  perusahaan = await fetchSheet(API_PERUSAHAAN);
+  proyek = await fetchSheet(API_PROYEK);
+}
+
+function formatRp(x){
+  return "Rp " + Number(x||0).toLocaleString("id-ID");
+}
+
+function getVal(obj, keys){
+  for(let k of keys){
+    if(obj[k]) return obj[k];
+  }
+  return "";
+}
+
+function initFilter(){
+  let kab = [...new Set(perusahaan.map(x=>getVal(x,["Kabupaten/Kota","Kabupaten"])))];
+  let stat = [...new Set(perusahaan.map(x=>getVal(x,["Status"])))];
+
+  $("#filterKab").html(`<option value="">Semua Kab</option>`+kab.map(x=>`<option>${x}</option>`));
+  $("#filterStatus").html(`<option value="">Semua Status</option>`+stat.map(x=>`<option>${x}</option>`));
+
+  $("#search, #filterKab, #filterStatus").on("input change", ()=>{
+    currentPage=1;
+    renderTable();
+  });
+}
+
+function getFiltered(){
+  let s=$("#search").val().toLowerCase();
+  let k=$("#filterKab").val();
+  let st=$("#filterStatus").val();
+
+  return perusahaan.filter(x=>
+    (!s || getVal(x,["Nama Penyedia","Nama"]).toLowerCase().includes(s)) &&
+    (!k || getVal(x,["Kabupaten/Kota","Kabupaten"])==k) &&
+    (!st || getVal(x,["Status"])==st)
+  );
+}
+
+function renderAll(){
+  renderTable();
+  renderKPI();
+  renderCharts();
+}
+
+function renderKPI(){
+  $("#kpiPerusahaan").text(perusahaan.length);
+  $("#kpiProyek").text(proyek.length);
+
+  let total = proyek.reduce((a,b)=>a+Number(b["nilai_kontrak"]||0),0);
+  $("#kpiNilai").text(formatRp(total));
+
+  let map={};
+  proyek.forEach(p=>{
+    map[p["Kode Penyedia"]] = (map[p["Kode Penyedia"]]||0)+Number(p["nilai_kontrak"]||0);
+  });
+
+  let top = Object.entries(map).sort((a,b)=>b[1]-a[1])[0];
+  let nama = perusahaan.find(x=>x["Kode Penyedia"]==top?.[0])?.["Nama Penyedia"] || "-";
+  $("#kpiTop").text(nama);
+}
+
+function renderTable(){
+  let data = getFiltered();
+
+  let start=(currentPage-1)*rows;
+  let pageData = data.slice(start,start+rows);
+
+  let html="";
+  pageData.forEach(d=>{
+    html+=`
+    <tr>
+      <td><button class="btn btn-sm btn-primary">View</button></td>
+      <td>${getVal(d, ["Kabupaten/Kota","Kabupaten"])}</td>
+      <td>${getVal(d, ["Status"])}</td>
+      <td>${getVal(d, ["Kode Penyedia","Kode"])}</td>
+      <td>${getVal(d, ["Nama Penyedia","Nama"])}</td>
+    </tr>`;
+  });
+
+  $("#tbody").html(html);
+  renderPagination(data.length);
+}
+
+function renderPagination(total){
+  let pages=Math.ceil(total/rows);
+  let html="";
+  for(let i=1;i<=pages;i++){
+    html+=`<button class="btn btn-sm ${i==currentPage?'btn-dark':'btn-light'}" onclick="goto(${i})">${i}</button> `;
+  }
+  $("#pagination").html(html);
+}
+
+function goto(p){
+  currentPage=p;
+  renderTable();
+}
+
+function renderCharts(){
+  let jumlah={}, nilai={};
+
+  proyek.forEach(p=>{
+    let k=p["Kabupaten/Kota"]||"Unknown";
+    jumlah[k]=(jumlah[k]||0)+1;
+    nilai[k]=(nilai[k]||0)+Number(p["nilai_kontrak"]||0);
+  });
+
+  new Chart(document.getElementById("chartJumlah"),{
+    type:'bar',
+    data:{labels:Object.keys(jumlah), datasets:[{label:'Jumlah Proyek', data:Object.values(jumlah)}]}
+  });
+
+  new Chart(document.getElementById("chartNilai"),{
+    type:'bar',
+    data:{labels:Object.keys(nilai), datasets:[{label:'Nilai Proyek', data:Object.values(nilai)}]}
+  });
+}
+
+init();
+
+</script>
