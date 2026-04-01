@@ -92,7 +92,6 @@ th, td { padding:10px; border-bottom:1px solid #eee }
 <tr>
 <th>Aksi</th>
 <th>Kab/Kota</th>
-<th>Status</th>
 <th>Kode</th>
 <th>Nama</th>
 </tr>
@@ -126,11 +125,16 @@ async function loadData(){
     perusahaan = await fetchSheet('PERUSAHAAN');
     proyek = await fetchSheet('PROYEK');
 
-    console.log("PERUSAHAAN:", perusahaan);
-    console.log("PROYEK:", proyek);
+    // FIX kab/kota kosong
+    perusahaan = perusahaan.map(d=>{
+        if(!d['Kabupaten/Kota'] || d['Kabupaten/Kota'].trim()===''){
+            d['Kabupaten/Kota'] = '-';
+        }
+        return d;
+    });
 }
 
-// FETCH (lebih fleksibel)
+// FETCH
 async function fetchSheet(sheet){
     const url = `https://docs.google.com/spreadsheets/d/1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg/export?format=csv&sheet=${sheet}`;
     
@@ -150,7 +154,11 @@ async function fetchSheet(sheet){
 // FILTER
 function initFilter(){
     const f = document.getElementById('filter');
-    const kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
+
+    let kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
+
+    // SORT ASCENDING
+    kab = kab.sort((a,b)=>a.localeCompare(b));
 
     f.innerHTML = `<option value="">ALL</option>`;
     kab.forEach(k=>f.innerHTML+=`<option>${k}</option>`);
@@ -185,8 +193,7 @@ function renderTable(){
         <button onclick="detail('${d['Kode Penyedia']}')">Detail</button>
         <button onclick="proj('${d['Kode Penyedia']}')">Proyek</button>
         </td>
-        <td>${d['Kabupaten/Kota']}</td>
-        <td>${d['Status']}</td>
+        <td>${d['Kabupaten/Kota'] || '-'}</td>
         <td>${d['Kode Penyedia']}</td>
         <td>${d['Nama Penyedia']}</td>
         </tr>`;
@@ -197,7 +204,7 @@ function renderTable(){
     renderPagination(data.length);
 }
 
-// PAGINATION (ADVANCED)
+// PAGINATION
 function renderPagination(total){
     let totalPages = Math.ceil(total/size);
     let html = '';
@@ -237,7 +244,7 @@ function detail(k){
     show(html);
 }
 
-// PROYEK (FIX FLEXIBLE KOLOM)
+// PROYEK
 function proj(k){
     let data = proyek.filter(p=>{
         return (p['Kode Penyedia']||p['kode_penyedia']) == k;
