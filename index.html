@@ -2,24 +2,30 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Konstruksi Enterprise</title>
+<title>Dashboard Konstruksi</title>
 
-<!-- ✅ jQuery FIX (load paling awal, TANPA defer/async) -->
+<!-- jQuery -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 
-<!-- Chart.js -->
+<!-- Chart -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Excel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
 body { font-family: Arial; margin:20px; background:#f5f6fa }
 .card { background:white; padding:15px; border-radius:10px; margin-bottom:15px }
-button { padding:5px 10px; margin:2px }
 table { width:100%; border-collapse: collapse }
 th, td { padding:8px; border-bottom:1px solid #ddd }
+button { padding:5px 10px; margin:2px }
+.search-box { margin-bottom:10px }
+.pagination button { margin-right:5px }
 #popup { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:none }
 #popup-content { background:white; padding:20px; margin:50px auto; width:70%; border-radius:10px }
 </style>
 </head>
+
 <body>
 
 <h2>📊 Dashboard Perusahaan Konstruksi</h2>
@@ -34,6 +40,11 @@ Filter Kabupaten:
 </div>
 
 <div class="card">
+<div class="search-box">
+<input type="text" id="search" placeholder="Cari nama / kode...">
+<button onclick="exportExcel()">Export Excel</button>
+</div>
+
 <table id="table">
 <thead>
 <tr>
@@ -46,6 +57,8 @@ Filter Kabupaten:
 </thead>
 <tbody></tbody>
 </table>
+
+<div id="pagination"></div>
 </div>
 
 <div id="popup">
@@ -56,33 +69,32 @@ Filter Kabupaten:
 
 let perusahaan = [];
 let proyek = [];
+let currentPage = 1;
+let pageSize = 10;
+let chart;
 
-// ✅ Pastikan jQuery sudah benar-benar ada
-if (typeof jQuery === 'undefined') {
-    document.getElementById('table').innerHTML = '<tr><td colspan="5">❌ jQuery gagal load</td></tr>';
-    throw new Error('jQuery not loaded');
-}
-
-$(document).ready(async function(){
+// INIT
+jQuery(document).ready(async function(){
     await loadData();
     renderFilter();
     renderTable();
     renderChart();
+
+    jQuery('#search').on('input', ()=>{
+        currentPage = 1;
+        renderTable();
+    });
 });
 
+// LOAD DATA
 async function loadData(){
-    const p1 = fetchSheet('PERUSAHAAN');
-    const p2 = fetchSheet('PROYEK');
-
-    const [d1, d2] = await Promise.all([p1,p2]);
-
-    perusahaan = d1;
-    proyek = d2;
+    perusahaan = await fetchSheet('PERUSAHAAN');
+    proyek = await fetchSheet('PROYEK');
 }
 
+// FETCH GOOGLE SHEET
 async function fetchSheet(sheet){
     const url = `https://docs.google.com/spreadsheets/d/1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg/gviz/tq?tqx=out:json&sheet=${sheet}`;
-
     const res = await fetch(url);
     const text = await res.text();
 
@@ -99,27 +111,39 @@ async function fetchSheet(sheet){
     });
 }
 
+// FILTER
 function renderFilter(){
     const kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
-    $('#filter').append(`<option value="">ALL</option>`);
+
+    jQuery('#filter').append(`<option value="">ALL</option>`);
     kab.forEach(k=>{
-        $('#filter').append(`<option>${k}</option>`);
+        jQuery('#filter').append(`<option>${k}</option>`);
     });
 
-    $('#filter').on('change', ()=>{
+    jQuery('#filter').on('change', ()=>{
+        currentPage = 1;
         renderTable();
         renderChart();
     });
 }
 
+// TABLE
 function renderTable(){
-    let f = $('#filter').val();
+    let f = jQuery('#filter').val();
+    let keyword = (jQuery('#search').val() || '').toLowerCase();
 
-    let data = perusahaan.filter(d=>!f || d['Kabupaten/Kota']==f);
+    let data = perusahaan.filter(d=>{
+        return (!f || d['Kabupaten/Kota']==f) &&
+        ((d['Nama Penyedia']||'').toLowerCase().includes(keyword) ||
+         (d['Kode Penyedia']||'').toLowerCase().includes(keyword));
+    });
+
+    let start = (currentPage-1)*pageSize;
+    let paged = data.slice(start, start+pageSize);
 
     let html = '';
 
-    data.forEach(d=>{
+    paged.forEach(d=>{
         html += `<tr>
         <td>
         <button onclick="detail('${d['Kode Penyedia']}')">Detail</button>
@@ -132,9 +156,28 @@ function renderTable(){
         </tr>`;
     });
 
-    $('#table tbody').html(html);
+    jQuery('#table tbody').html(html);
+    renderPagination(data.length);
 }
 
+// PAGINATION
+function renderPagination(total){
+    let pages = Math.ceil(total/pageSize);
+    let html = '';
+
+    for(let i=1;i<=pages;i++){
+        html += `<button onclick="goPage(${i})">${i}</button>`;
+    }
+
+    jQuery('#pagination').html(html);
+}
+
+function goPage(p){
+    currentPage = p;
+    renderTable();
+}
+
+// DETAIL
 function detail(kode){
     let d = perusahaan.find(x=>x['Kode Penyedia']==kode);
 
@@ -147,6 +190,7 @@ function detail(kode){
     showPopup(html);
 }
 
+// PROYEK
 function lihatProyek(kode){
     let data = proyek.filter(p=>p['Kode Penyedia']==kode);
 
@@ -162,24 +206,26 @@ function lihatProyek(kode){
     for(let k in grouped){
         html += `<h4>${k}</h4>`;
         grouped[k].forEach(p=>{
-            html += `<p>${p['Nama Paket']} | ${p['nilai_kontrak']}</p>`;
+            html += `<p>${p['Nama Paket']} | Rp ${p['nilai_kontrak']}</p>`;
         });
     }
 
     showPopup(html);
 }
 
+// POPUP
 function showPopup(html){
-    $('#popup-content').html(html + '<br><button onclick="closePopup()">Close</button>');
-    $('#popup').show();
+    jQuery('#popup-content').html(html + '<br><button onclick="closePopup()">Close</button>');
+    jQuery('#popup').show();
 }
 
 function closePopup(){
-    $('#popup').hide();
+    jQuery('#popup').hide();
 }
 
+// CHART
 function renderChart(){
-    let f = $('#filter').val();
+    let f = jQuery('#filter').val();
 
     let data = perusahaan.filter(d=>!f || d['Kabupaten/Kota']==f);
 
@@ -190,17 +236,30 @@ function renderChart(){
         count[k] = (count[k]||0)+1;
     });
 
-    const ctx = document.getElementById('chart');
+    if(chart) chart.destroy();
 
-    // destroy chart lama biar tidak dobel
-if(window.myChart){ window.myChart.destroy(); }
-window.myChart = new Chart(ctx, {
+    chart = new Chart(document.getElementById('chart'), {
         type: 'bar',
         data: {
             labels: Object.keys(count),
             datasets: [{ data: Object.values(count) }]
         }
     });
+}
+
+// EXPORT
+function exportExcel(){
+    const data = perusahaan.map(d=>({
+        Kabupaten: d['Kabupaten/Kota'],
+        Status: d['Status'],
+        Kode: d['Kode Penyedia'],
+        Nama: d['Nama Penyedia']
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
+    XLSX.writeFile(wb, "perusahaan.xlsx");
 }
 
 </script>
