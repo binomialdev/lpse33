@@ -2,43 +2,85 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Konstruksi</title>
+<title>Dashboard Konstruksi PRO</title>
 
-<!-- jQuery CDN -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-
-<!-- Fallback jQuery -->
-<script>
-if (typeof jQuery === "undefined") {
-    document.write('<script src="https://code.jquery.com/jquery-3.6.0.min.js"><\/script>');
-}
-</script>
-
-<!-- Chart -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<!-- Excel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
-body { font-family: Arial; margin:20px; background:#f5f6fa }
-.card { background:white; padding:15px; border-radius:10px; margin-bottom:15px }
-table { width:100%; border-collapse: collapse }
-th, td { padding:8px; border-bottom:1px solid #ddd }
-button { padding:5px 10px; margin:2px; cursor:pointer }
-.search-box { margin-bottom:10px }
-#pagination button { margin-right:5px }
-#popup { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:none }
-#popup-content { background:white; padding:20px; margin:50px auto; width:70%; border-radius:10px }
+body { font-family: 'Segoe UI'; margin:0; background:#f1f5f9 }
+.container { padding:20px }
+
+.card {
+    background:white;
+    padding:20px;
+    border-radius:12px;
+    margin-bottom:20px;
+    box-shadow:0 4px 10px rgba(0,0,0,0.05)
+}
+
+h2 { margin-bottom:10px }
+
+input, select {
+    padding:8px;
+    border-radius:8px;
+    border:1px solid #ddd;
+}
+
+button {
+    padding:8px 12px;
+    border:none;
+    border-radius:8px;
+    background:#2563eb;
+    color:white;
+    cursor:pointer;
+}
+
+button:hover { background:#1d4ed8 }
+
+table {
+    width:100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding:10px;
+    border-bottom:1px solid #eee;
+}
+
+.pagination button {
+    margin:3px;
+    background:#e2e8f0;
+    color:black;
+}
+
+#modal {
+    position:fixed;
+    top:0; left:0;
+    width:100%; height:100%;
+    background:rgba(0,0,0,0.5);
+    display:none;
+}
+
+#modal-content {
+    background:white;
+    margin:50px auto;
+    padding:20px;
+    width:70%;
+    border-radius:12px;
+    max-height:80vh;
+    overflow:auto;
+}
 </style>
 </head>
 
 <body>
 
-<h2>📊 Dashboard Perusahaan Konstruksi</h2>
+<div class="container">
+
+<h2>📊 Dashboard Konstruksi (PRO)</h2>
 
 <div class="card">
-Filter Kabupaten:
 <select id="filter"></select>
 </div>
 
@@ -47,127 +89,112 @@ Filter Kabupaten:
 </div>
 
 <div class="card">
-<div class="search-box">
-<input type="text" id="search" placeholder="Cari nama / kode...">
+<input type="text" id="search" placeholder="Cari...">
 <button onclick="exportExcel()">Export Excel</button>
-</div>
 
-<table id="table">
+<table>
 <thead>
 <tr>
-<th>View</th>
+<th>Aksi</th>
 <th>Kab/Kota</th>
 <th>Status</th>
 <th>Kode</th>
 <th>Nama</th>
 </tr>
 </thead>
-<tbody></tbody>
+<tbody id="tbody"></tbody>
 </table>
 
-<div id="pagination"></div>
+<div class="pagination" id="pagination"></div>
 </div>
 
-<div id="popup">
-<div id="popup-content"></div>
+</div>
+
+<div id="modal">
+<div id="modal-content"></div>
 </div>
 
 <script>
 
-let perusahaan = [];
-let proyek = [];
-let currentPage = 1;
-let pageSize = 10;
-let chart = null;
+let perusahaan=[], proyek=[];
+let page=1, size=10, chart;
 
-// READY (AMAN)
-jQuery(document).ready(function(){
-    init();
-});
+// INIT
+window.onload = async ()=>{
+    await loadData();
+    initFilter();
+    render();
+};
 
-async function init(){
-    try{
-        await loadData();
-        renderFilter();
-        renderTable();
-        renderChart();
-
-        jQuery('#search').on('input', function(){
-            currentPage = 1;
-            renderTable();
-        });
-
-    } catch(err){
-        alert("ERROR LOAD DATA: " + err.message);
-        console.error(err);
-    }
-}
-
-// LOAD DATA
+// LOAD + CACHE
 async function loadData(){
+    if(localStorage.getItem('perusahaan')){
+        perusahaan = JSON.parse(localStorage.getItem('perusahaan'));
+        proyek = JSON.parse(localStorage.getItem('proyek'));
+        return;
+    }
+
     perusahaan = await fetchSheet('PERUSAHAAN');
     proyek = await fetchSheet('PROYEK');
+
+    localStorage.setItem('perusahaan', JSON.stringify(perusahaan));
+    localStorage.setItem('proyek', JSON.stringify(proyek));
 }
 
-// FETCH GOOGLE SHEET
+// FETCH
 async function fetchSheet(sheet){
     const url = `https://docs.google.com/spreadsheets/d/1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg/gviz/tq?tqx=out:json&sheet=${sheet}`;
-    
     const res = await fetch(url);
-    if(!res.ok) throw new Error("Gagal fetch sheet " + sheet);
-
-    const text = await res.text();
-    const json = JSON.parse(text.substring(47).slice(0,-2));
+    const txt = await res.text();
+    const json = JSON.parse(txt.substring(47).slice(0,-2));
 
     const cols = json.table.cols.map(c=>c.label);
 
     return json.table.rows.map(r=>{
-        let obj = {};
-        r.c.forEach((c,i)=>{
-            obj[cols[i]] = c ? c.v : '';
-        });
-        return obj;
+        let o={};
+        r.c.forEach((c,i)=>o[cols[i]]=c?c.v:'');
+        return o;
     });
 }
 
 // FILTER
-function renderFilter(){
+function initFilter(){
+    const f = document.getElementById('filter');
     const kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
 
-    jQuery('#filter').html(`<option value="">ALL</option>`);
+    f.innerHTML = `<option value="">ALL</option>`;
+    kab.forEach(k=>f.innerHTML+=`<option>${k}</option>`);
 
-    kab.forEach(k=>{
-        jQuery('#filter').append(`<option>${k}</option>`);
-    });
+    f.onchange = ()=>{ page=1; render(); };
+    document.getElementById('search').oninput = ()=>{ page=1; render(); };
+}
 
-    jQuery('#filter').on('change', function(){
-        currentPage = 1;
-        renderTable();
-        renderChart();
-    });
+// RENDER
+function render(){
+    renderTable();
+    renderChart();
 }
 
 // TABLE
 function renderTable(){
-    let f = jQuery('#filter').val();
-    let keyword = (jQuery('#search').val() || '').toLowerCase();
+    const f = document.getElementById('filter').value;
+    const q = document.getElementById('search').value.toLowerCase();
 
     let data = perusahaan.filter(d=>{
-        return (!f || d['Kabupaten/Kota']==f) &&
-        ((d['Nama Penyedia']||'').toLowerCase().includes(keyword) ||
-         (d['Kode Penyedia']||'').toLowerCase().includes(keyword));
+        return (!f||d['Kabupaten/Kota']==f) &&
+        (d['Nama Penyedia']||'').toLowerCase().includes(q);
     });
 
-    let start = (currentPage-1)*pageSize;
-    let paged = data.slice(start, start+pageSize);
+    const start=(page-1)*size;
+    const slice=data.slice(start,start+size);
 
-    let html = '';
-
-    paged.forEach(d=>{
-        html += `<tr>
+    let html='';
+    slice.forEach(d=>{
+        html+=`
+        <tr>
         <td>
         <button onclick="detail('${d['Kode Penyedia']}')">Detail</button>
-        <button onclick="lihatProyek('${d['Kode Penyedia']}')">Proyek</button>
+        <button onclick="proj('${d['Kode Penyedia']}')">Proyek</button>
         </td>
         <td>${d['Kabupaten/Kota']}</td>
         <td>${d['Status']}</td>
@@ -176,109 +203,88 @@ function renderTable(){
         </tr>`;
     });
 
-    jQuery('#table tbody').html(html);
-    renderPagination(data.length);
+    document.getElementById('tbody').innerHTML=html;
+
+    renderPage(data.length);
 }
 
 // PAGINATION
-function renderPagination(total){
-    let pages = Math.ceil(total/pageSize);
-    let html = '';
+function renderPage(total){
+    let pages=Math.ceil(total/size);
+    let html='';
 
     for(let i=1;i<=pages;i++){
-        html += `<button onclick="goPage(${i})">${i}</button>`;
+        html+=`<button onclick="go(${i})">${i}</button>`;
     }
 
-    jQuery('#pagination').html(html);
+    document.getElementById('pagination').innerHTML=html;
 }
 
-function goPage(p){
-    currentPage = p;
-    renderTable();
-}
+function go(p){ page=p; renderTable(); }
 
 // DETAIL
-function detail(kode){
-    let d = perusahaan.find(x=>x['Kode Penyedia']==kode);
-    let html = `<h3>Detail Perusahaan</h3>`;
+function detail(k){
+    let d=perusahaan.find(x=>x['Kode Penyedia']==k);
+    let html='<h3>Detail</h3>';
 
     Object.keys(d).forEach(k=>{
-        html += `<p><b>${k}</b>: ${d[k]}</p>`;
+        html+=`<p><b>${k}</b>: ${d[k]}</p>`;
     });
 
-    showPopup(html);
+    show(html);
 }
 
 // PROYEK
-function lihatProyek(kode){
-    let data = proyek.filter(p=>p['Kode Penyedia']==kode);
+function proj(k){
+    let data=proyek.filter(p=>p['Kode Penyedia']==k);
 
-    let grouped = {};
-
+    let html='<h3>Proyek</h3>';
     data.forEach(p=>{
-        if(!grouped[p['Kode RUP']]) grouped[p['Kode RUP']] = [];
-        grouped[p['Kode RUP']].push(p);
+        html+=`<p>${p['Nama Paket']} | Rp ${p['nilai_kontrak']}</p>`;
     });
 
-    let html = `<h3>Daftar Proyek</h3>`;
-
-    for(let k in grouped){
-        html += `<h4>${k}</h4>`;
-        grouped[k].forEach(p=>{
-            html += `<p>${p['Nama Paket']} | Rp ${p['nilai_kontrak']}</p>`;
-        });
-    }
-
-    showPopup(html);
+    show(html);
 }
 
-// POPUP
-function showPopup(html){
-    jQuery('#popup-content').html(html + '<br><button onclick="closePopup()">Close</button>');
-    jQuery('#popup').show();
+// MODAL
+function show(html){
+    document.getElementById('modal-content').innerHTML =
+        html + '<br><button onclick="closeM()">Close</button>';
+    document.getElementById('modal').style.display='block';
 }
 
-function closePopup(){
-    jQuery('#popup').hide();
+function closeM(){
+    document.getElementById('modal').style.display='none';
 }
 
 // CHART
 function renderChart(){
-    let f = jQuery('#filter').val();
+    const f=document.getElementById('filter').value;
+    let data=perusahaan.filter(d=>!f||d['Kabupaten/Kota']==f);
 
-    let data = perusahaan.filter(d=>!f || d['Kabupaten/Kota']==f);
-
-    let count = {};
-
+    let count={};
     data.forEach(d=>{
-        let k = d['Kabupaten/Kota'];
-        count[k] = (count[k]||0)+1;
+        let k=d['Kabupaten/Kota'];
+        count[k]=(count[k]||0)+1;
     });
 
     if(chart) chart.destroy();
 
-    chart = new Chart(document.getElementById('chart'), {
-        type: 'bar',
-        data: {
-            labels: Object.keys(count),
-            datasets: [{ data: Object.values(count) }]
+    chart=new Chart(document.getElementById('chart'),{
+        type:'bar',
+        data:{
+            labels:Object.keys(count),
+            datasets:[{data:Object.values(count)}]
         }
     });
 }
 
 // EXPORT
 function exportExcel(){
-    const data = perusahaan.map(d=>({
-        Kabupaten: d['Kabupaten/Kota'],
-        Status: d['Status'],
-        Kode: d['Kode Penyedia'],
-        Nama: d['Nama Penyedia']
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Data");
-    XLSX.writeFile(wb, "perusahaan.xlsx");
+    const ws=XLSX.utils.json_to_sheet(perusahaan);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Data");
+    XLSX.writeFile(wb,"data.xlsx");
 }
 
 </script>
