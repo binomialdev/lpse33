@@ -1,172 +1,209 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Konstruksi Enterprise</title>
+
+<!-- ✅ jQuery FIX (load paling awal, TANPA defer/async) -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body { font-family: Arial; margin:20px; background:#f5f6fa }
+.card { background:white; padding:15px; border-radius:10px; margin-bottom:15px }
+button { padding:5px 10px; margin:2px }
+table { width:100%; border-collapse: collapse }
+th, td { padding:8px; border-bottom:1px solid #ddd }
+#popup { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:none }
+#popup-content { background:white; padding:20px; margin:50px auto; width:70%; border-radius:10px }
+</style>
+</head>
+<body>
+
+<h2>📊 Dashboard Perusahaan Konstruksi</h2>
+
+<div class="card">
+Filter Kabupaten:
+<select id="filter"></select>
+</div>
+
+<div class="card">
+<canvas id="chart"></canvas>
+</div>
+
+<div class="card">
+<table id="table">
+<thead>
+<tr>
+<th>View</th>
+<th>Kab/Kota</th>
+<th>Status</th>
+<th>Kode</th>
+<th>Nama</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+
+<div id="popup">
+<div id="popup-content"></div>
+</div>
+
 <script>
 
-const sheetID = "1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg";
+let perusahaan = [];
+let proyek = [];
 
-const API_PERUSAHAAN = `https://docs.google.com/spreadsheets/d/${sheetID}/gviz/tq?tqx=out:json&sheet=PERUSAHAAN`;
-const API_PROYEK = `https://docs.google.com/spreadsheets/d/${sheetID}/gviz/tq?tqx=out:json&sheet=PROYEK`;
-
-let perusahaan=[], proyek=[];
-let currentPage=1, rows=10;
-
-async function init(){
-  try {
-    await loadData();
-    console.log("DATA PERUSAHAAN:", perusahaan);
-    console.log("DATA PROYEK:", proyek);
-
-    initFilter();
-    renderAll();
-  } catch(err){
-    alert("ERROR LOAD DATA: " + err.message);
-    console.error(err);
-  } finally {
-    $("#loader").hide();
-  }
+// ✅ Pastikan jQuery sudah benar-benar ada
+if (typeof jQuery === 'undefined') {
+    document.getElementById('table').innerHTML = '<tr><td colspan="5">❌ jQuery gagal load</td></tr>';
+    throw new Error('jQuery not loaded');
 }
+
+$(document).ready(async function(){
+    await loadData();
+    renderFilter();
+    renderTable();
+    renderChart();
+});
 
 async function loadData(){
+    const p1 = fetchSheet('PERUSAHAAN');
+    const p2 = fetchSheet('PROYEK');
 
-  async function fetchSheet(url){
-    let res = await fetch(url);
-    let text = await res.text();
+    const [d1, d2] = await Promise.all([p1,p2]);
 
-    // 🔥 FIX parsing aman
-    let jsonText = text.match(/google\.visualization\.Query\.setResponse\((.*)\);/);
-    if(!jsonText) throw new Error("Format data tidak valid");
+    perusahaan = d1;
+    proyek = d2;
+}
 
-    let json = JSON.parse(jsonText[1]);
+async function fetchSheet(sheet){
+    const url = `https://docs.google.com/spreadsheets/d/1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg/gviz/tq?tqx=out:json&sheet=${sheet}`;
 
-    let cols = json.table.cols.map(c => c.label);
-    let rows = json.table.rows.map(r => {
-      let obj = {};
-      r.c.forEach((c,i)=>{
-        obj[cols[i]] = c ? c.v : "";
-      });
-      return obj;
+    const res = await fetch(url);
+    const text = await res.text();
+
+    const json = JSON.parse(text.substring(47).slice(0,-2));
+
+    const cols = json.table.cols.map(c=>c.label);
+
+    return json.table.rows.map(r=>{
+        let obj = {};
+        r.c.forEach((c,i)=>{
+            obj[cols[i]] = c ? c.v : '';
+        });
+        return obj;
+    });
+}
+
+function renderFilter(){
+    const kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
+    $('#filter').append(`<option value="">ALL</option>`);
+    kab.forEach(k=>{
+        $('#filter').append(`<option>${k}</option>`);
     });
 
-    return rows;
-  }
-
-  perusahaan = await fetchSheet(API_PERUSAHAAN);
-  proyek = await fetchSheet(API_PROYEK);
-}
-
-function formatRp(x){
-  return "Rp " + Number(x||0).toLocaleString("id-ID");
-}
-
-function getVal(obj, keys){
-  for(let k of keys){
-    if(obj[k]) return obj[k];
-  }
-  return "";
-}
-
-function initFilter(){
-  let kab = [...new Set(perusahaan.map(x=>getVal(x,["Kabupaten/Kota","Kabupaten"])))];
-  let stat = [...new Set(perusahaan.map(x=>getVal(x,["Status"])))];
-
-  $("#filterKab").html(`<option value="">Semua Kab</option>`+kab.map(x=>`<option>${x}</option>`));
-  $("#filterStatus").html(`<option value="">Semua Status</option>`+stat.map(x=>`<option>${x}</option>`));
-
-  $("#search, #filterKab, #filterStatus").on("input change", ()=>{
-    currentPage=1;
-    renderTable();
-  });
-}
-
-function getFiltered(){
-  let s=$("#search").val().toLowerCase();
-  let k=$("#filterKab").val();
-  let st=$("#filterStatus").val();
-
-  return perusahaan.filter(x=>
-    (!s || getVal(x,["Nama Penyedia","Nama"]).toLowerCase().includes(s)) &&
-    (!k || getVal(x,["Kabupaten/Kota","Kabupaten"])==k) &&
-    (!st || getVal(x,["Status"])==st)
-  );
-}
-
-function renderAll(){
-  renderTable();
-  renderKPI();
-  renderCharts();
-}
-
-function renderKPI(){
-  $("#kpiPerusahaan").text(perusahaan.length);
-  $("#kpiProyek").text(proyek.length);
-
-  let total = proyek.reduce((a,b)=>a+Number(b["nilai_kontrak"]||0),0);
-  $("#kpiNilai").text(formatRp(total));
-
-  let map={};
-  proyek.forEach(p=>{
-    map[p["Kode Penyedia"]] = (map[p["Kode Penyedia"]]||0)+Number(p["nilai_kontrak"]||0);
-  });
-
-  let top = Object.entries(map).sort((a,b)=>b[1]-a[1])[0];
-  let nama = perusahaan.find(x=>x["Kode Penyedia"]==top?.[0])?.["Nama Penyedia"] || "-";
-  $("#kpiTop").text(nama);
+    $('#filter').on('change', ()=>{
+        renderTable();
+        renderChart();
+    });
 }
 
 function renderTable(){
-  let data = getFiltered();
+    let f = $('#filter').val();
 
-  let start=(currentPage-1)*rows;
-  let pageData = data.slice(start,start+rows);
+    let data = perusahaan.filter(d=>!f || d['Kabupaten/Kota']==f);
 
-  let html="";
-  pageData.forEach(d=>{
-    html+=`
-    <tr>
-      <td><button class="btn btn-sm btn-primary">View</button></td>
-      <td>${getVal(d, ["Kabupaten/Kota","Kabupaten"])}</td>
-      <td>${getVal(d, ["Status"])}</td>
-      <td>${getVal(d, ["Kode Penyedia","Kode"])}</td>
-      <td>${getVal(d, ["Nama Penyedia","Nama"])}</td>
-    </tr>`;
-  });
+    let html = '';
 
-  $("#tbody").html(html);
-  renderPagination(data.length);
+    data.forEach(d=>{
+        html += `<tr>
+        <td>
+        <button onclick="detail('${d['Kode Penyedia']}')">Detail</button>
+        <button onclick="lihatProyek('${d['Kode Penyedia']}')">Proyek</button>
+        </td>
+        <td>${d['Kabupaten/Kota']}</td>
+        <td>${d['Status']}</td>
+        <td>${d['Kode Penyedia']}</td>
+        <td>${d['Nama Penyedia']}</td>
+        </tr>`;
+    });
+
+    $('#table tbody').html(html);
 }
 
-function renderPagination(total){
-  let pages=Math.ceil(total/rows);
-  let html="";
-  for(let i=1;i<=pages;i++){
-    html+=`<button class="btn btn-sm ${i==currentPage?'btn-dark':'btn-light'}" onclick="goto(${i})">${i}</button> `;
-  }
-  $("#pagination").html(html);
+function detail(kode){
+    let d = perusahaan.find(x=>x['Kode Penyedia']==kode);
+
+    let html = `<h3>Detail Perusahaan</h3>`;
+
+    Object.keys(d).forEach(k=>{
+        html += `<p><b>${k}</b>: ${d[k]}</p>`;
+    });
+
+    showPopup(html);
 }
 
-function goto(p){
-  currentPage=p;
-  renderTable();
+function lihatProyek(kode){
+    let data = proyek.filter(p=>p['Kode Penyedia']==kode);
+
+    let grouped = {};
+
+    data.forEach(p=>{
+        if(!grouped[p['Kode RUP']]) grouped[p['Kode RUP']] = [];
+        grouped[p['Kode RUP']].push(p);
+    });
+
+    let html = `<h3>Daftar Proyek</h3>`;
+
+    for(let k in grouped){
+        html += `<h4>${k}</h4>`;
+        grouped[k].forEach(p=>{
+            html += `<p>${p['Nama Paket']} | ${p['nilai_kontrak']}</p>`;
+        });
+    }
+
+    showPopup(html);
 }
 
-function renderCharts(){
-  let jumlah={}, nilai={};
-
-  proyek.forEach(p=>{
-    let k=p["Kabupaten/Kota"]||"Unknown";
-    jumlah[k]=(jumlah[k]||0)+1;
-    nilai[k]=(nilai[k]||0)+Number(p["nilai_kontrak"]||0);
-  });
-
-  new Chart(document.getElementById("chartJumlah"),{
-    type:'bar',
-    data:{labels:Object.keys(jumlah), datasets:[{label:'Jumlah Proyek', data:Object.values(jumlah)}]}
-  });
-
-  new Chart(document.getElementById("chartNilai"),{
-    type:'bar',
-    data:{labels:Object.keys(nilai), datasets:[{label:'Nilai Proyek', data:Object.values(nilai)}]}
-  });
+function showPopup(html){
+    $('#popup-content').html(html + '<br><button onclick="closePopup()">Close</button>');
+    $('#popup').show();
 }
 
-init();
+function closePopup(){
+    $('#popup').hide();
+}
+
+function renderChart(){
+    let f = $('#filter').val();
+
+    let data = perusahaan.filter(d=>!f || d['Kabupaten/Kota']==f);
+
+    let count = {};
+
+    data.forEach(d=>{
+        let k = d['Kabupaten/Kota'];
+        count[k] = (count[k]||0)+1;
+    });
+
+    const ctx = document.getElementById('chart');
+
+    // destroy chart lama biar tidak dobel
+if(window.myChart){ window.myChart.destroy(); }
+window.myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(count),
+            datasets: [{ data: Object.values(count) }]
+        }
+    });
+}
 
 </script>
+
+</body>
+</html>
