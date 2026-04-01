@@ -2,333 +2,245 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Konstruksi PRO (API Fast)</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<title>Monitoring Proyek</title>
 
 <style>
-body { font-family:'Segoe UI'; margin:0; background:#f1f5f9 }
-.container { padding:20px }
-
-.card {
-    background:white;
-    padding:20px;
-    border-radius:12px;
-    margin-bottom:20px;
-    box-shadow:0 4px 10px rgba(0,0,0,0.05)
+body {
+    font-family: Arial;
+    padding: 20px;
 }
 
-input, select {
-    padding:8px;
-    border-radius:8px;
-    border:1px solid #ddd;
+select, button {
+    padding: 6px 10px;
+    margin: 5px;
 }
 
-button {
-    padding:6px 10px;
-    border:none;
-    border-radius:8px;
-    background:#2563eb;
-    color:white;
-    cursor:pointer;
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
 }
 
-button:hover { background:#1d4ed8 }
+th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+}
 
-table { width:100%; border-collapse: collapse }
-th, td { padding:10px; border-bottom:1px solid #eee }
+th {
+    background: #f4f4f4;
+}
 
 .pagination button {
-    margin:2px;
-    background:#e2e8f0;
-    color:black;
+    margin: 3px;
 }
 
-#modal {
-    position:fixed;
-    top:0; left:0;
-    width:100%; height:100%;
-    background:rgba(0,0,0,0.5);
-    display:none;
-}
-
-#modal-content {
-    background:white;
-    margin:40px auto;
-    padding:20px;
-    width:70%;
-    border-radius:12px;
-    max-height:80vh;
-    overflow:auto;
-    position:relative;
-}
-
-.close-btn {
-    position:absolute;
-    top:10px;
-    left:10px;
-    background:red;
+.badge {
+    background: #007bff;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
 }
 </style>
 </head>
 
 <body>
 
-<div class="container">
+<h2>Monitoring Proyek</h2>
 
-<h2>⚡ Dashboard Konstruksi (API Super Fast)</h2>
-
-<div class="card">
-<select id="filter"></select>
-<button onclick="refreshData()">🔄 Refresh Data</button>
-</div>
-
-<div class="card">
-<input type="text" id="search" placeholder="Cari...">
-<button onclick="exportExcel()">Export Excel</button>
+<select id="filterKab">
+    <option value="">Semua Kab/Kota</option>
+</select>
 
 <table>
 <thead>
 <tr>
-<th>Aksi</th>
-<th>Kab/Kota</th>
-<th>Kode</th>
-<th>Nama</th>
+    <th>Nama Perusahaan</th>
+    <th>Kab/Kota</th>
+    <th>Aksi</th>
 </tr>
 </thead>
-<tbody id="tbody"></tbody>
+<tbody id="tableBody"></tbody>
 </table>
 
-<div class="pagination" id="pagination"></div>
-</div>
-
-</div>
-
-<div id="modal">
-<div id="modal-content"></div>
+<div class="pagination">
+    <button onclick="firstPage()">First</button>
+    <button onclick="prevPage()">Prev</button>
+    <span id="pageInfo"></span>
+    <button onclick="nextPage()">Next</button>
+    <button onclick="lastPage()">Last</button>
 </div>
 
 <script>
-
-let perusahaan=[], proyek=[];
-let page=1, size=10;
-
-const CACHE_KEY = "API_KONSTRUKSI_V2";
 const SHEET_ID = "1H6HMmjpkiEzyuJBJhepfdRPoIW6pVQSBalZRdcVeTZg";
 
-// INIT
-window.onload = async ()=>{
-    await loadData();
-    initFilter();
-    render();
-};
+let perusahaanData = [];
+let proyekData = [];
 
-// ======================
-// ⚡ LOAD DATA API
-// ======================
-async function loadData(){
+let currentPage = 1;
+let perPage = 10;
+let filteredData = [];
 
-    const cache = localStorage.getItem(CACHE_KEY);
-    if(cache){
-        console.log("⚡ cache aktif");
-        const parsed = JSON.parse(cache);
-        perusahaan = parsed.perusahaan;
-        proyek = parsed.proyek;
-        return;
-    }
 
-    console.log("🌐 ambil dari API");
-
-    const [p1, p2] = await Promise.all([
-        fetchAPI("PERUSAHAAN"),
-        fetchAPI("PROYEK")
-    ]);
-
-    perusahaan = cleanData(p1);
-    proyek = p2;
-
-    localStorage.setItem(CACHE_KEY, JSON.stringify({perusahaan, proyek}));
-}
-
-// ======================
-// 🔥 GOOGLE API PARSER
-// ======================
-async function fetchAPI(sheetName){
+// ================= FETCH API SUPER CEPAT =================
+async function fetchSheet(sheetName){
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
     
     const res = await fetch(url);
-    const text = await res.text();
+    let text = await res.text();
 
-    // bersihkan wrapper
     const json = JSON.parse(text.substring(47).slice(0, -2));
 
-    const cols = json.table.cols.map(c=>c.label);
     const rows = json.table.rows;
+    const cols = json.table.cols.map(c => c.label);
 
-    return rows.map(r=>{
-        let obj={};
-        r.c.forEach((cell,i)=>{
+    return rows.map(r => {
+        let obj = {};
+        r.c.forEach((cell, i) => {
             obj[cols[i]] = cell ? cell.v : '';
         });
         return obj;
     });
 }
 
-// ======================
-// CLEAN DATA
-// ======================
-function cleanData(data){
-    return data.map(d=>{
-        let values = Object.values(d);
 
-        let kab = values[2] || '';
+// ================= LOAD DATA =================
+async function loadData(){
+    let cache = localStorage.getItem('db_cache_v3');
 
-        kab = kab.toString()
-            .replace(/\s+/g,' ')
-            .trim();
+    if(cache){
+        let parsed = JSON.parse(cache);
+        perusahaanData = parsed.perusahaan;
+        proyekData = parsed.proyek;
+    } else {
+        perusahaanData = await fetchSheet('PERUSAHAAN');
+        proyekData = await fetchSheet('PROYEK');
 
-        if(!kab) kab='-';
-
-        d['Kabupaten/Kota'] = kab;
-
-        return d;
-    });
-}
-
-// ======================
-// FILTER
-// ======================
-function initFilter(){
-    const f = document.getElementById('filter');
-
-    let kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
-
-    kab.sort((a,b)=> a.localeCompare(b,'id',{sensitivity:'base'}));
-
-    f.innerHTML = `<option value="">ALL</option>`;
-    kab.forEach(k=>f.innerHTML+=`<option>${k}</option>`);
-    
-    f.onchange = ()=>{ page=1; render(); };
-    document.getElementById('search').oninput = ()=>{ page=1; render(); };
-}
-
-// ======================
-function render(){
-    renderTable();
-}
-
-function renderTable(){
-    const f = document.getElementById('filter').value;
-    const q = document.getElementById('search').value.toLowerCase();
-
-    let data = perusahaan.filter(d=>{
-        return (!f||d['Kabupaten/Kota']==f) &&
-        (d['Nama Penyedia']||'').toLowerCase().includes(q);
-    });
-
-    const start=(page-1)*size;
-    const slice=data.slice(start,start+size);
-
-    let html='';
-    slice.forEach(d=>{
-        html+=`
-        <tr>
-        <td>
-        <button onclick="detail('${d['Kode Penyedia']}')">Detail</button>
-        <button onclick="proj('${d['Kode Penyedia']}')">Proyek</button>
-        </td>
-        <td>${d['Kabupaten/Kota']}</td>
-        <td>${d['Kode Penyedia']}</td>
-        <td>${d['Nama Penyedia']}</td>
-        </tr>`;
-    });
-
-    document.getElementById('tbody').innerHTML=html;
-
-    renderPagination(data.length);
-}
-
-// PAGINATION
-function renderPagination(total){
-    let totalPages = Math.ceil(total/size);
-    let html='';
-
-    html += `<button onclick="go(1)">First</button>`;
-    html += `<button onclick="go(${page-1})">Prev</button>`;
-
-    for(let i=Math.max(1,page-2); i<=Math.min(totalPages,page+2); i++){
-        html += `<button onclick="go(${i})">${i}</button>`;
+        localStorage.setItem('db_cache_v3', JSON.stringify({
+            perusahaan: perusahaanData,
+            proyek: proyekData
+        }));
     }
 
-    html += `<button onclick="go(${page+1})">Next</button>`;
-    html += `<button onclick="go(${totalPages})">Last</button>`;
-
-    document.getElementById('pagination').innerHTML=html;
+    initFilter();
+    applyFilter();
 }
 
-function go(p){
-    if(p<1) return;
-    page=p;
+
+// ================= FILTER =================
+function initFilter(){
+    let setKab = new Set();
+
+    perusahaanData.forEach(d => {
+        let values = Object.values(d);
+        let kab = values[2] || '';
+
+        if(kab && kab.toString().trim() !== ''){
+            setKab.add(kab.toString().trim());
+        }
+    });
+
+    let arr = [...setKab].sort((a,b)=>a.localeCompare(b,'id'));
+
+    let select = document.getElementById("filterKab");
+    select.innerHTML = '<option value="">Semua Kab/Kota</option>';
+
+    arr.forEach(k => {
+        let opt = document.createElement("option");
+        opt.value = k;
+        opt.textContent = k;
+        select.appendChild(opt);
+    });
+}
+
+document.getElementById("filterKab").addEventListener("change", applyFilter);
+
+
+// ================= APPLY FILTER =================
+function applyFilter(){
+    let selected = document.getElementById("filterKab").value;
+
+    filteredData = perusahaanData.filter(d => {
+        let values = Object.values(d);
+        let kab = values[2] || '';
+        return selected === "" || kab === selected;
+    });
+
+    currentPage = 1;
     renderTable();
 }
 
-// DETAIL
-function detail(k){
-    let d = perusahaan.find(x=>x['Kode Penyedia']==k);
-    let html = `<button class="close-btn" onclick="closeM()">X</button>`;
-    html += `<h3>Detail Penyedia</h3>`;
 
-    Object.keys(d).forEach(key=>{
-        html += `<p><b>${key}</b>: ${d[key]}</p>`;
+// ================= RENDER TABLE =================
+function renderTable(){
+    let start = (currentPage - 1) * perPage;
+    let end = start + perPage;
+
+    let data = filteredData.slice(start, end);
+
+    let html = '';
+
+    data.forEach(d => {
+        let values = Object.values(d);
+
+        let nama = values[1] || '-';
+        let kab = values[2] || '-';
+
+        html += `
+        <tr>
+            <td>${nama}</td>
+            <td>${kab}</td>
+            <td><span class="badge" onclick="showDetail('${nama}')">Detail</span></td>
+        </tr>
+        `;
     });
 
-    show(html);
+    document.getElementById("tableBody").innerHTML = html;
+
+    let totalPage = Math.ceil(filteredData.length / perPage);
+    document.getElementById("pageInfo").innerText = `Page ${currentPage} / ${totalPage}`;
 }
 
-// PROYEK
-function proj(k){
-    let data = proyek.filter(p=>
-        (p['Kode Penyedia']||p['kode_penyedia'])==k
-    );
 
-    let html = `<button class="close-btn" onclick="closeM()">X</button>`;
-    html += `<h3>Daftar Proyek</h3>`;
+// ================= PAGINATION =================
+function nextPage(){
+    let totalPage = Math.ceil(filteredData.length / perPage);
+    if(currentPage < totalPage){
+        currentPage++;
+        renderTable();
+    }
+}
 
-    if(!data.length) html += `<p>Tidak ada proyek</p>`;
+function prevPage(){
+    if(currentPage > 1){
+        currentPage--;
+        renderTable();
+    }
+}
 
-    data.forEach(p=>{
-        html += `<p>
-        ${p['Nama Paket']||p['nama_paket']||'-'}
-        | Rp ${p['nilai_kontrak']||p['Nilai Kontrak']||0}
-        </p>`;
+function firstPage(){
+    currentPage = 1;
+    renderTable();
+}
+
+function lastPage(){
+    currentPage = Math.ceil(filteredData.length / perPage);
+    renderTable();
+}
+
+
+// ================= DETAIL =================
+function showDetail(nama){
+    let proyek = proyekData.filter(p => {
+        return JSON.stringify(p).includes(nama);
     });
 
-    show(html);
+    alert("Jumlah proyek: " + proyek.length);
 }
 
-// MODAL
-function show(html){
-    document.getElementById('modal-content').innerHTML=html;
-    document.getElementById('modal').style.display='block';
-}
 
-function closeM(){
-    document.getElementById('modal').style.display='none';
-}
-
-// EXPORT
-function exportExcel(){
-    const ws = XLSX.utils.json_to_sheet(perusahaan);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Data");
-    XLSX.writeFile(wb, "data.xlsx");
-}
-
-// REFRESH
-function refreshData(){
-    localStorage.removeItem(CACHE_KEY);
-    location.reload();
-}
+// ================= INIT =================
+loadData();
 
 </script>
 
