@@ -125,11 +125,22 @@ async function loadData(){
     perusahaan = await fetchSheet('PERUSAHAAN');
     proyek = await fetchSheet('PROYEK');
 
-    // FIX kab/kota kosong
+    // ✅ FIX: ambil kolom C + cleaning
     perusahaan = perusahaan.map(d=>{
-        if(!d['Kabupaten/Kota'] || d['Kabupaten/Kota'].trim()===''){
-            d['Kabupaten/Kota'] = '-';
-        }
+        const keys = Object.keys(d);
+
+        let kab = d[keys[2]] || '';
+
+        // CLEANING
+        kab = kab
+            .replace(/\u00A0/g,' ') // hapus NBSP
+            .replace(/\s+/g,' ')    // rapikan spasi
+            .trim();
+
+        if(kab === '') kab = '-';
+
+        d['Kabupaten/Kota'] = kab;
+
         return d;
     });
 }
@@ -155,10 +166,15 @@ async function fetchSheet(sheet){
 function initFilter(){
     const f = document.getElementById('filter');
 
-    let kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
+    let kab = [...new Set(
+        perusahaan.map(d => d['Kabupaten/Kota'])
+    )];
 
-    // SORT ASCENDING
-    kab = kab.sort((a,b)=>a.localeCompare(b));
+    // hapus kosong kecuali "-"
+    kab = kab.filter(k => k);
+
+    // SORT ASCENDING FIX
+    kab.sort((a,b)=> a.localeCompare(b, 'id', { sensitivity:'base' }));
 
     f.innerHTML = `<option value="">ALL</option>`;
     kab.forEach(k=>f.innerHTML+=`<option>${k}</option>`);
@@ -193,7 +209,7 @@ function renderTable(){
         <button onclick="detail('${d['Kode Penyedia']}')">Detail</button>
         <button onclick="proj('${d['Kode Penyedia']}')">Proyek</button>
         </td>
-        <td>${d['Kabupaten/Kota'] || '-'}</td>
+        <td>${d['Kabupaten/Kota']}</td>
         <td>${d['Kode Penyedia']}</td>
         <td>${d['Nama Penyedia']}</td>
         </tr>`;
