@@ -44,7 +44,6 @@ th, td { padding:10px; border-bottom:1px solid #eee }
     color:black;
 }
 
-/* MODAL */
 #modal {
     position:fixed;
     top:0; left:0;
@@ -77,7 +76,7 @@ th, td { padding:10px; border-bottom:1px solid #eee }
 
 <div class="container">
 
-<h2>📊 Dashboard Perusahaan Konstruksi</h2>
+<h2>⚡ Dashboard Konstruksi (Fast Mode)</h2>
 
 <div class="card">
 <select id="filter"></select>
@@ -113,6 +112,8 @@ th, td { padding:10px; border-bottom:1px solid #eee }
 let perusahaan=[], proyek=[];
 let page=1, size=10;
 
+const CACHE_KEY = "DATA_KONSTRUKSI_V1";
+
 // INIT
 window.onload = async ()=>{
     await loadData();
@@ -120,28 +121,58 @@ window.onload = async ()=>{
     render();
 };
 
-// LOAD DATA
+// =====================
+// ⚡ LOAD DATA (CACHE)
+// =====================
 async function loadData(){
-    perusahaan = await fetchSheet('PERUSAHAAN');
-    proyek = await fetchSheet('PROYEK');
 
-    // ✅ FIX: ambil kolom C + cleaning
-    perusahaan = perusahaan.map(d=>{
-        const keys = Object.keys(d);
+    const cache = localStorage.getItem(CACHE_KEY);
 
-        let kab = d[keys[2]] || '';
+    if(cache){
+        console.log("⚡ Load dari cache");
+        const parsed = JSON.parse(cache);
+        perusahaan = parsed.perusahaan;
+        proyek = parsed.proyek;
+        return;
+    }
 
-        // CLEANING
-        kab = kab
-            .replace(/\u00A0/g,' ') // hapus NBSP
-            .replace(/\s+/g,' ')    // rapikan spasi
-            .trim();
+    console.log("🌐 Fetch dari server");
 
-        if(kab === '') kab = '-';
+    const [p1, p2] = await Promise.all([
+        fetchSheet('PERUSAHAAN'),
+        fetchSheet('PROYEK')
+    ]);
 
-        d['Kabupaten/Kota'] = kab;
+    perusahaan = cleanData(p1);
+    proyek = p2;
 
-        return d;
+    // simpan cache
+    localStorage.setItem(CACHE_KEY, JSON.stringify({perusahaan, proyek}));
+}
+
+// =====================
+// ⚡ CSV PARSER CEPAT
+// =====================
+function parseCSV(text){
+    const rows = text.split('\n');
+    return rows.map(row=>{
+        const result=[];
+        let current='', inQuotes=false;
+
+        for(let i=0;i<row.length;i++){
+            const char=row[i];
+
+            if(char === '"'){
+                inQuotes=!inQuotes;
+            }else if(char===',' && !inQuotes){
+                result.push(current);
+                current='';
+            }else{
+                current+=char;
+            }
+        }
+        result.push(current);
+        return result;
     });
 }
 
@@ -152,8 +183,8 @@ async function fetchSheet(sheet){
     const res = await fetch(url);
     const text = await res.text();
 
-    const rows = text.split('\n').map(r=>r.split(','));
-    const headers = rows[0].map(h=>h.trim());
+    const rows = parseCSV(text);
+    const headers = rows[0];
 
     return rows.slice(1).map(r=>{
         let obj={};
@@ -162,19 +193,37 @@ async function fetchSheet(sheet){
     });
 }
 
+// =====================
+// ⚡ CLEAN DATA SEKALI
+// =====================
+function cleanData(data){
+    return data.map(d=>{
+        const keys = Object.keys(d);
+
+        let kab = d[keys[2]] || '';
+
+        kab = kab
+            .replace(/\u00A0/g,' ')
+            .replace(/\s+/g,' ')
+            .trim();
+
+        if(!kab) kab='-';
+
+        d['Kabupaten/Kota'] = kab;
+
+        return d;
+    });
+}
+
+// =====================
 // FILTER
+// =====================
 function initFilter(){
     const f = document.getElementById('filter');
 
-    let kab = [...new Set(
-        perusahaan.map(d => d['Kabupaten/Kota'])
-    )];
+    let kab = [...new Set(perusahaan.map(d=>d['Kabupaten/Kota']))];
 
-    // hapus kosong kecuali "-"
-    kab = kab.filter(k => k);
-
-    // SORT ASCENDING FIX
-    kab.sort((a,b)=> a.localeCompare(b, 'id', { sensitivity:'base' }));
+    kab.sort((a,b)=> a.localeCompare(b,'id',{sensitivity:'base'}));
 
     f.innerHTML = `<option value="">ALL</option>`;
     kab.forEach(k=>f.innerHTML+=`<option>${k}</option>`);
@@ -183,7 +232,9 @@ function initFilter(){
     document.getElementById('search').oninput = ()=>{ page=1; render(); };
 }
 
+// =====================
 // RENDER
+// =====================
 function render(){
     renderTable();
 }
@@ -223,15 +274,12 @@ function renderTable(){
 // PAGINATION
 function renderPagination(total){
     let totalPages = Math.ceil(total/size);
-    let html = '';
-
-    let start = Math.max(1, page-2);
-    let end = Math.min(totalPages, page+2);
+    let html='';
 
     html += `<button onclick="go(1)">First</button>`;
     html += `<button onclick="go(${page-1})">Prev</button>`;
 
-    for(let i=start;i<=end;i++){
+    for(let i=Math.max(1,page-2); i<=Math.min(totalPages,page+2); i++){
         html += `<button onclick="go(${i})">${i}</button>`;
     }
 
@@ -243,7 +291,7 @@ function renderPagination(total){
 
 function go(p){
     if(p<1) return;
-    page = p;
+    page=p;
     renderTable();
 }
 
@@ -262,21 +310,19 @@ function detail(k){
 
 // PROYEK
 function proj(k){
-    let data = proyek.filter(p=>{
-        return (p['Kode Penyedia']||p['kode_penyedia']) == k;
-    });
+    let data = proyek.filter(p=>
+        (p['Kode Penyedia']||p['kode_penyedia'])==k
+    );
 
     let html = `<button class="close-btn" onclick="closeM()">X</button>`;
     html += `<h3>Daftar Proyek</h3>`;
 
-    if(data.length==0){
-        html += `<p>Tidak ada proyek</p>`;
-    }
+    if(!data.length) html += `<p>Tidak ada proyek</p>`;
 
     data.forEach(p=>{
         html += `<p>
-        ${p['Nama Paket'] || p['nama_paket'] || '-'} 
-        | Rp ${p['nilai_kontrak'] || p['Nilai Kontrak'] || 0}
+        ${p['Nama Paket']||p['nama_paket']||'-'}
+        | Rp ${p['nilai_kontrak']||p['Nilai Kontrak']||0}
         </p>`;
     });
 
@@ -285,7 +331,7 @@ function proj(k){
 
 // MODAL
 function show(html){
-    document.getElementById('modal-content').innerHTML = html;
+    document.getElementById('modal-content').innerHTML=html;
     document.getElementById('modal').style.display='block';
 }
 
